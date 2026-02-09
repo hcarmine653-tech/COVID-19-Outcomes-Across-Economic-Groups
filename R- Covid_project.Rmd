@@ -1,0 +1,861 @@
+---
+title: "Assessment_1_Topic_1"
+output:
+  pdf_document: default
+  html_document: default
+date: "2025-01-24"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Part A: Exploratory Data Analysis and Predictive Data Analysis Using R
+
+##Topic 1 COVID-19
+
+###Task 1: Data wrangling and integration
+
+Loading relevant r packages:
+```{r}
+library(tidyverse)
+library(here)
+```
+
+
+Firstly we will import each of the three datasets and examine the tables columns and data types.
+
+Importing "Covid.Data" table and viewing the table:
+```{r}
+#import Covid dataset
+Covid.data <- read.csv(here("Raw Data", "Covid-data.csv"),)
+
+head(Covid.data)
+```
+
+The "Covid.data" table appears to show the amount of new covid cases and deaths classified by date and country while also displaying the countries gdp per capita and total population.
+
+
+```{r}
+#Selecting rows with missing data
+Covid.data_missing <- Covid.data[!complete.cases(Covid.data), ]
+Covid.data_missing
+```
+As we can see there are 11 rows with missing data in this table. These NA values take place within the "new_deaths" and "total_deaths" columns. Interestingly they all appear on rows ending in 1, eg 101, 251 etc.
+
+
+```{r}
+# Start with a clean copy
+covid.data_tidy <- Covid.data %>%
+  arrange(location, date) %>%   # ensure correct chronological order
+  mutate(row_id = row_number())
+
+# Impute missing total_deaths using cumulative logic
+# Identify rows where total_deaths is missing
+missing_total <- covid.data_tidy %>%
+  filter(is.na(total_deaths)) %>%
+  pull(row_id)
+
+# Reconstruct total_deaths using previous day's cumulative total
+covid.data_tidy <- covid.data_tidy %>%
+  mutate(
+    total_deaths = if_else(
+      is.na(total_deaths),
+      lag(total_deaths) + new_deaths,
+      total_deaths
+    )
+  )
+
+# Inspect affected rows
+covid.data_tidy %>%
+  slice(sort(c(missing_total - 1, missing_total)))
+```
+
+For missing new deaths we can get the total deaths from the next day and subtract them by the total deaths in the row with the missing new deaths to get the missing value.
+
+```{r}
+#calculate missing values for new deaths
+# Identify rows where new_deaths is missing
+missing_new <- covid.data_tidy %>%
+  filter(is.na(new_deaths)) %>%
+  pull(row_id)
+
+# Reconstruct new_deaths using difference between cumulative totals
+covid.data_tidy <- covid.data_tidy %>%
+  mutate(
+    new_deaths = if_else(
+      is.na(new_deaths),
+      total_deaths - lag(total_deaths),
+      new_deaths
+    )
+  )
+
+# Inspect affected rows to check new deaths columns
+covid.data_tidy %>%
+  slice(sort(c(missing_new - 1, missing_new)))
+
+
+```
+
+For UK on 2020-01-19 which has 0 cases and 0 total cases we must update total_deaths and new_deaths by changing their value to 0 since it is impossible to die from covid if you do not have covid.
+
+```{r}
+# Filter row based on location and date and replace new and total deaths values to 0
+covid.data_tidy <- covid.data_tidy %>%
+  mutate(
+    total_deaths = if_else(
+      location == "United Kingdom" &
+      date == as.Date("2020-01-19") &
+      is.na(total_deaths),
+      0,
+      total_deaths
+    ),
+    new_deaths = if_else(
+      location == "United Kingdom" &
+      date == as.Date("2020-01-19") &
+      is.na(new_deaths),
+      0,
+      new_deaths
+    )
+  )
+
+
+# Inspect affected rows
+covid.data_tidy %>%
+  filter(location == "United Kingdom",
+         as.Date(date) == as.Date("2020-01-19"))
+
+  
+```
+For the row where location is United States and date is 2020-07-03 total deaths and new deaths are both missing and there are a number of total cases so we will need to calculate the missing values using data from the previous and subsequent days.
+To find the missing total deaths we can subtract the new deaths from the total deaths on the next date.
+To find the missing new deaths we can subtract the previous total deaths from the newly calculated total deaths.
+```{r}
+# --- 1. Calculate missing total_deaths for 2020-05-01 ---
+
+# Values from 2020-05-02
+us_total_0502 <- covid.data_tidy %>%
+  filter(location == "United States",
+         date == as.Date("2020-05-02")) %>%
+  pull(total_deaths)
+
+us_new_0502 <- covid.data_tidy %>%
+  filter(location == "United States",
+         date == as.Date("2020-05-02")) %>%
+  pull(new_deaths)
+
+# Update total_deaths for 2020-05-01
+covid.data_tidy <- covid.data_tidy %>%
+  mutate(
+    total_deaths = if_else(
+      location == "United States" &
+      date == as.Date("2020-05-01") &
+      is.na(total_deaths),
+      us_total_0502 - us_new_0502,
+      total_deaths
+    )
+  )
+
+
+# --- 2. Calculate missing new_deaths for 2020-05-01 ---
+
+# Values from 2020-05-01 and 2020-04-30
+us_total_0501 <- covid.data_tidy %>%
+  filter(location == "United States",
+         date == as.Date("2020-05-01")) %>%
+  pull(total_deaths)
+
+us_total_0430 <- covid.data_tidy %>%
+  filter(location == "United States",
+         date == as.Date("2020-04-30")) %>%
+  pull(total_deaths)
+
+# Update new_deaths for 2020-05-01
+covid.data_tidy <- covid.data_tidy %>%
+  mutate(
+    new_deaths = if_else(
+      location == "United States" &
+      date == as.Date("2020-05-01") &
+      is.na(new_deaths),
+      us_total_0501 - us_total_0430,
+      new_deaths
+    )
+  )
+
+#view column to check updated values
+covid.data_tidy %>%
+  filter(location == "United States",
+         date == as.Date("2020-05-01"))
+```
+Now we will check the covid.data_tidy table again to see if all the missing values have been filled.
+
+```{r}
+#Check for missing values
+covid.data_tidy[!complete.cases(covid.data_tidy), ]
+```
+And if all the code chunks have been executed in sequential order we can see there are no more missing values for the covid.data table.
+
+Now we will import data from the countrylockdowndates table
+
+```{r}
+CountryLockdowndates <- read.csv(here("Raw Data", "CountryLockdowndates.csv"))
+head(CountryLockdowndates, 10)
+```
+This table shows a list of countries, the type of lockdown they had during covid and when they went on lockdown.
+
+selecting rows with missing data:
+```{r}
+#Select rows with missing data
+CountryLockdowndates_missing <- CountryLockdowndates[!complete.cases(CountryLockdowndates), ]
+CountryLockdowndates_missing
+```
+
+This shows that the table country lockdown dates has no missing values.
+
+Finally we will now import the final data set worldwidevaccinedata
+
+```{r}
+#Import worldwide vaccine data table
+WorldwideVaccineData <- read.csv(here("Raw Data", "WorldwideVaccineData.csv"), header=TRUE)
+head(WorldwideVaccineData)
+```
+This table shows a list of countries statistics relating to the proportion of their population who have been fully and partially vaccinated against covid.
+
+selecting rows with missing data:
+```{r}
+#Select missing data
+vaccine_missing <- WorldwideVaccineData[!complete.cases(WorldwideVaccineData), ]
+vaccine_missing
+```
+Since 0 rows are selected this missing there is no missing data in this table.
+
+Before we can join these three data sets into one table we need to convert the different date columns into the formats. 
+
+At the moment the CountryLockdowndates table has dates in the format dd/mm/yyyy, while the covid.data_tidy table has dates in the format yyyy-mm-dd.
+To make things consistent we will convert the date format int eh CountryLockdowndates table to the universal date format of yyyy-mm-dd.
+
+```{r}
+#Converting CountryLockdowndates dates column to yyyy-mm-dd
+
+for (index in seq_along(CountryLockdowndates[,3])){
+  date <- CountryLockdowndates[index ,3]
+  if (date != ""){
+    input_date <- as.Date(date, format = "%d/%m/%Y")
+    CountryLockdowndates[index, 3] <- format(input_date, "%Y-%m-%d")
+  }
+}
+head(CountryLockdowndates, 10)
+```
+
+Now we will rename the country.region column name so we can join it with the location column in the covid.data_tidy table.
+```{r}
+#renaming CountryLockdowndates columns country.region to location and date to lockdown date
+names(CountryLockdowndates)[names(CountryLockdowndates) == "Country.Region"] <- "location"
+names(CountryLockdowndates)[names(CountryLockdowndates) == "Date"] <- "lockdown_date"
+
+```
+
+Now we will remove columns from the countrylockdowndates table that we do not want to use and display all of the locations that are in duplicate.
+```{r}
+# add new data frame to manipulate
+lock_down <- CountryLockdowndates
+#select all countries with duplicates
+lock_down <- lock_down %>%
+  arrange(location, lockdown_date) %>%
+  filter(duplicated(location)== TRUE)
+#select to only display location and lockdown_date
+lock_down <- subset(lock_down, select = c(location, lockdown_date))
+#Display first 10 rows
+head(lock_down,10)
+```
+As we can see Australia, Canada, China, France, Netherlands, US, United Kingdom have multiple dates for lockdown_date, this is due to the different regions/ states within the countries having their own dates for lockdowns. 
+To tidy our data in the lock_down table we will only have 1 row for each country and the lockdown date will be the earliest within that countries provences.
+
+```{r}
+#add new data frame to manipulate
+lock_down <- CountryLockdowndates
+#Remove duplicate countries
+lock_down <- lock_down %>%
+  arrange(location, lockdown_date) %>%
+  filter(duplicated(location)== FALSE)
+#select to only display location and lockdown_date
+lock_down <- subset(lock_down, select = c(location, lockdown_date))
+#Assign earliest lockdown dates to duplicate countries
+lock_down[9,2] <- "2020-03-24" #Australia
+lock_down[32,2] <- "2020-03-14" #Canada
+lock_down[36,2] <- "2020-01-23" #China
+lock_down[61,2] <- "2020-03-16" #France
+lock_down[120,2] <- "2020-03-16" #Netherlands
+lock_down[170,2] <- "2020-03-13" #US
+lock_down[174,2] <- "2020-03-18" #United Kingdom
+```
+
+
+
+Now We will rename the country column in worldwidevaccinedata to location too.
+
+```{r}
+#renaming worldwidevaccinedata country column to location
+names(WorldwideVaccineData)[names(WorldwideVaccineData) == "Country"] <- "location"
+```
+
+Now that the dates in both tables have the same format now we can join the three tables. To do this we will perform multiple inner joins joining on the location.
+
+```{r}
+#inner join covid.data_tidy to worldwidevaccinedata on location column
+covid_data_vaccine_join <- inner_join(covid.data_tidy, WorldwideVaccineData, by = "location")
+head(covid_data_vaccine_join)
+```
+
+Now we will inner join our covid_data_vaccine_join table to countrylockdowndates table.
+
+```{r}
+#Joining covide_data_vaccine_join with countrylockdowndates
+covid_data_joined <- inner_join(covid_data_vaccine_join, lock_down, by = "location")
+
+head(covid_data_joined)
+```
+Now that all the tables have been joined we can now remove the columns we are not interested in.
+
+```{r}
+#remove columns that are not needed
+covid_data_joined <- subset(covid_data_joined, select = -c(Doses.administered.per.100.people, X..of.population.vaccinated, row_id))
+#rename columns
+names(covid_data_joined)[names(covid_data_joined) == "Total.doses.administered"] <- "total_doses_administered"
+names(covid_data_joined)[names(covid_data_joined) == "X..of.population.vaccinated"] <- "%_of_population_fully_vaccinated"
+head(covid_data_joined)
+```
+Now we will convert our date and lockdown_date columns to date format.
+```{r}
+#Convert date column from chr data type to date data type
+covid_data_joined <- mutate(covid_data_joined, date = as.Date(date, format = "%Y-%m-%d"))
+#Convert lockdown_date column from chr data type to date data type
+covid_data_joined <- mutate(covid_data_joined, lockdown_date = as.Date(lockdown_date, format = "%Y-%m-%d"))
+#check for errors or missing values
+covid_data_joined_missing <- covid_data_joined[!complete.cases(covid_data_joined), ]
+head(covid_data_joined_missing)
+```
+It appears that some date columns are in the incorrect format and will need to be changed to the correct format.
+
+```{r}
+#Assigning loop output to a new variable
+date_correct_loop <- covid_data_joined
+#For loop to search date column to find na and replace it with date from previous index +1 day
+for(index in seq_along(date_correct_loop[,2])){
+  if(is.na(date_correct_loop[index,2])){
+    date_correct_loop[index,2] <- date_correct_loop[index-1,2]+1
+  }
+}
+#Check for missing values
+date_correct_loop[!complete.cases(date_correct_loop), ]
+```
+Now we can check if the dates have been correctly assigned.
+```{r}
+#Check previous missing indexes for correct date changes
+date_correct_loop[c(162, 163, 164, 165, 166, 213, 214, 215), ]
+```
+```{r}
+#Examine case/ death columns for negative values
+if (count(filter(date_correct_loop, total_cases < 0)) >0){
+  print("Negative values in: total_cases")
+}
+if (count(filter(date_correct_loop, new_cases < 0)) >0){
+  print("Negative values in: new_cases")
+}
+if (count(filter(date_correct_loop, total_deaths < 0)) >0){
+  print("Negative values in: total_deaths")
+}
+if (count(filter(date_correct_loop, new_deaths < 0)) >0){
+  print("Negative values in: new_deaths")
+}
+```
+Since we have negative values in our new_cases and new_deaths columns we will need to find them and correct them.
+
+```{r}
+#Select rows with negative data
+negative_values <- filter(date_correct_loop, new_deaths <0 | new_cases <0)
+negative_values
+#Examine dates before the rows with negative values to check if negative values can be multiplied by -1
+filter(date_correct_loop, date == "2020-06-05" & location == "France")
+filter(date_correct_loop, date == "2020-06-24" & location == "Italy")
+filter(date_correct_loop, date == "2020-04-18" & location == "Spain")
+filter(date_correct_loop, date == "2020-05-24" & location == "Spain")
+```
+As we can see here with the different extracted data frames the rows with negative values have affected the corresponding total column as well so we will need t o multiple the negative value by -1 and add the new value to the total column to fix it.
+
+```{r}
+#Assign loop variable for negative values loop
+negative_val_loop <- date_correct_loop
+#For loop to search for rows with negative values in new_cases, multiply the value be -1 and add the value to correct the corresponding total column
+for(i in seq_along(negative_val_loop[,4])){
+ if (negative_val_loop[i,4] < 0){
+   negative_val_loop[i,4] <- negative_val_loop[i,4] * -1
+   negative_val_loop[i,3] <- negative_val_loop[i,3] + negative_val_loop[i,4]
+   
+ }
+}
+#Check for negative values in new_cases
+filter(negative_val_loop, new_cases < 0)
+
+```
+
+Now we will perform the same action to the negative values in the new_deaths column.
+
+```{r}
+#For loop to search for rows with negative values in new_deaths, multiply the value be -1 and add the value to correct the corresponding total column
+for(i in seq_along(negative_val_loop[,6])){
+ if (negative_val_loop[i,6] < 0){
+   negative_val_loop[i,6] <- negative_val_loop[i,6] * -1
+   negative_val_loop[i,5] <- negative_val_loop[i,5] + negative_val_loop[i,6]
+   
+ }
+}
+#Check for negative values in new_deaths
+filter(negative_val_loop, new_cases < 0)
+```
+Now we will recalculate the total_cases column using the new_case column to ensure no counting errors have taken place in the table.
+
+
+```{r}
+# Initialize first row of dataset
+negative_val_loop[1, 3] <- negative_val_loop[1, 4]
+
+prev_country <- negative_val_loop[1, 1]
+prev_date    <- negative_val_loop[1, 2]
+
+for (i in 2:nrow(negative_val_loop)) {
+
+  current_country <- negative_val_loop[i, 1]
+  current_date    <- negative_val_loop[i, 2]
+
+  # Case 1: new country → reset cumulative
+  if (current_country != prev_country) {
+    negative_val_loop[i, 3] <- negative_val_loop[i, 4]
+  # Case 2: same country and first non-zero total_cases → convert total_cases to new_cases
+  } else if (negative_val_loop[i-1,3] == 0 &&
+             negative_val_loop[i-1,4] == 0) {
+    negative_val_loop[i,3] <- negative_val_loop[i,4]
+  # Case 3: same country AND consecutive date → cumulative update
+  } else if (current_date == prev_date + 1) {
+    negative_val_loop[i, 3] <- negative_val_loop[i - 1, 3] + negative_val_loop[i, 4]
+
+  # Case 4: same country BUT date skipped → keep existing total_cases unless new_cases > total_cases - previous total_cases then add new_cases and previous total_cases together 
+  } else { if (negative_val_loop[i,3] < negative_val_loop[i-1,3] +
+               negative_val_loop[i,4]){
+    negative_val_loop[i,3] <- negative_val_loop[i,4] + negative_val_loop[i-1,3]
+  }
+   
+  }
+
+  # update trackers
+  prev_country <- current_country
+  prev_date    <- current_date
+}
+
+
+```
+
+```{r}
+#Examine case/ death columns for negative values
+filter(negative_val_loop[c(186,187,188,189,190,191),])
+```
+Now the the total_cases column is incrementing correctly we will now correct the values in the total_deaths column.
+
+
+```{r}
+# Initialize first row of dataset
+negative_val_loop[1, 5] <- negative_val_loop[1, 6]
+
+prev_country <- negative_val_loop[1, 1]
+prev_date    <- negative_val_loop[1, 2]
+
+for (i in 2:nrow(negative_val_loop)) {
+
+  current_country <- negative_val_loop[i, 1]
+  current_date    <- negative_val_loop[i, 2]
+
+  # Case 1: new country → reset cumulative
+  if (current_country != prev_country) {
+    negative_val_loop[i, 5] <- negative_val_loop[i, 6]
+  # Case 2: same country and first non-zero total_deaths → convert total_deaths to new_deaths
+  } else if (negative_val_loop[i-1,5] == 0 &&
+             negative_val_loop[i-1,6] == 0) {
+    negative_val_loop[i,5] <- negative_val_loop[i,6]
+  # Case 3: same country AND consecutive date → cumulative update
+  } else if (current_date == prev_date + 1) {
+    negative_val_loop[i, 5] <- negative_val_loop[i - 1, 5] + negative_val_loop[i, 6]
+
+  # Case 4: same country BUT date skipped → keep existing total_deaths unless new_deaths > total_cases - previous total_deaths then add new_deaths and previous total_deaths together 
+  } else { if (negative_val_loop[i,5] < negative_val_loop[i-1,5] +
+               negative_val_loop[i,6]){
+    negative_val_loop[i,5] <- negative_val_loop[i,6] + negative_val_loop[i-1,5]
+  }
+   
+  }
+
+  # update trackers
+  prev_country <- current_country
+  prev_date    <- current_date
+}
+
+
+```
+
+Lets check our data again for any negative values.
+
+```{r}
+#Examine case/ death columns for negative values
+filter(negative_val_loop, new_deaths <0 | new_cases <0)
+```
+Lets produce a quick plot as a final check to see if there are any irregularties in our data.
+
+```{r}
+#Plot a line graph using the clean covid data examining new cases over time
+ggplot(data = negative_val_loop, aes(x = date, y = new_cases, group = location, color = location))+
+  geom_line(linewidth = 0.5)+
+  #Split plot by country, give each plot its own scale
+  facet_grid(rows = vars(location), scales = "free")
+  
+```
+As you can see from the plot there is a value that does not look quite right in the Iran data where the new cases go from thousands to 0 to thousands in one day. Lets examine it closer.
+
+```{r}
+#filter Iran data by rows with 0 new_cases.
+head(filter(negative_val_loop, new_cases == 0 & location == "Iran"))
+```
+At the end of this table we can find a row with high total cases and total deaths, this is our outlier row. Since we have no way of finding out the correct case data from this date, we will omit the row.
+
+```{r}
+#Delete outlier data row
+negative_val_loop <- negative_val_loop[-c(477), ]
+```
+
+We will now perform the same check for new_deaths.
+
+```{r}
+#Plot a line graph using the clean covid data examining new cases over time
+ggplot(data = negative_val_loop, aes(x = date, y = new_deaths, group = location, color = location))+
+  geom_line(linewidth = 0.5)+
+  #Split plot by country, give each plot its own scale
+  facet_grid(rows = vars(location), scales = "free")
+```
+We can see Iran has another row with outlier data. Lets examine it closer.
+
+```{r}
+#filter Iran data by rows with 0 new_deaths.
+tail(filter(negative_val_loop, new_deaths == 0 & location == "Iran"))
+```
+At the end of this table we can find a row with high total cases and total deaths, this is our outlier row. Since we have no way of finding out the correct case data from this date, we will omit the row.
+
+```{r}
+#Delete outlier row
+negative_val_loop <- negative_val_loop[-c(555), ]
+```
+
+
+Now we can assign our clean data to a new variable name.
+
+```{r}
+#Reassign cleaned data to a new variable
+covid_data_clean <- negative_val_loop
+covid_data_clean
+```
+
+
+Finally we have our cleaned and joined dataset ready for analysis.
+
+###Task 2: Data visualisation and analysis
+
+First we will create a plot to examine the trend of new cases in each country.
+
+```{r}
+#Plot a line graph using the clean covid data examining new cases over time
+ggplot(data = covid_data_clean, aes(x = date, y = new_cases, group = location, color = location))+
+  geom_line(linewidth = 0.5)+
+  #Scale x-axis by month
+  scale_x_date(date_breaks = "1 month", date_labels = "%b-%y")+
+  #Split plot by country, give each plot its own scale
+  facet_grid(rows = vars(location), scales = "free")+
+  #Add title
+  labs(title = "Countries New Covid Infections By Calendar Date", colour = "Location")+
+  #Add vertical lines representing when lockdowns first began in each of the countries
+  geom_vline(data = filter(covid_data_clean, location == "Australia"), 
+aes(xintercept = covid_data_clean[1,11]))+
+  geom_vline(data = filter(covid_data_clean, location == "France"), aes(xintercept = covid_data_clean[213,11]))+
+  geom_vline(data = filter(covid_data_clean, location == "Iran"), aes(xintercept = covid_data_clean[400,11]))+
+  geom_vline(data = filter(covid_data_clean, location == "Italy"), aes(xintercept = covid_data_clean[588,11]))+
+  geom_vline(data = filter(covid_data_clean, location == "Spain"), aes(xintercept = covid_data_clean[808,11]))+
+  #Add x-axis label
+  xlab("Date")+
+  #Add y-axis label
+  ylab("New Cases")
+  
+```
+When examining the data in the plot above we can see that each of the countries have a peak of new cases around late March/ early April which begins to taper off after the peak. Marked by the black vertical line we can see the date the each country placed their first lockdowns and we can see for most of the countries within a month it caused new cases to decrease with some decreases being sharper than others.
+
+```{r}
+#Plot a line graph using the clean covid data examining new cases over time
+ggplot(data = filter(covid_data_clean, location == "Australia"), aes(x = date, y = new_cases, group = location, color = location))+
+  geom_line(linewidth = 0.75)+
+  #Scale x-axis by month
+  scale_x_date(date_breaks = "1 month", date_labels = "%b-%y")+
+  #Add title
+  labs(title = "Australia's New Covid Infections By Calendar Date")+
+  #Add vertical lines representing when lockdowns first began in each of the countries
+  geom_vline(data = filter(covid_data_clean, location == "Australia"), aes(xintercept = covid_data_clean[1,11]))+
+   #Add x-axis label
+  xlab("Date")+
+  #Add y-axis label
+  ylab("New Cases")
+
+```
+In Australia we can see that there is a sharp increase in cases in mid to late March. On March 20 Australia closed its international borders and brought in social distancing laws to implement a zero-COVID suppression strategy and on March 24 lockdowns were beginning to be introduced.[1] As we can see after these measures there is a sharp decrease in the amount of new cases which falls to almost 0 daily cases until there is a spike of cases in July due to an outbreak in Victoria hotel quarantine system.[2] 
+
+
+```{r}
+#Plot a line graph using the clean covid data examining new cases over time
+ggplot(data = filter(covid_data_clean, location == "France"), aes(x = date, y = new_cases, group = location, color = location))+
+  geom_line(linewidth = 0.75, colour = "darkkhaki")+
+  #Scale x-axis by month
+  scale_x_date(date_breaks = "1 month", date_labels = "%b-%y")+
+  #Add title
+  labs(title = "France's New Covid Infections By Calendar Date")+
+  #Add vertical lines representing when lockdowns first began in each of the countries
+  geom_vline(data = filter(covid_data_clean, location == "France"), aes(xintercept = covid_data_clean[213,11]))+
+   #Add x-axis label
+  xlab("Date")+
+  #Add y-axis label
+  ylab("New Cases")
+
+```
+In France we can see there is a similar spike in cases compared to Australia, however the amount of cases is ten times higher. France's lockdowns were implemented over a few days and the daily cases were already quite high which caused a lag between the lock down beginning and the cases dropping.[3] The spike present in mid May is likely due to the easing of restrictions allowing for schools to reopen.[4]
+
+
+```{r}
+#Plot a line graph using the clean covid data examining new cases over time
+ggplot(data = filter(covid_data_clean, location == "Iran"), aes(x = date, y = new_cases, group = location, color = location))+
+  geom_line(linewidth = 0.75, colour = "aquamarine3")+
+  #Scale x-axis by month
+  scale_x_date(date_breaks = "1 month", date_labels = "%b-%y")+
+  #Add title
+  labs(title = "Iran's New Covid Infections By Calendar Date")+
+  #Add vertical lines representing when lockdowns first began in each of the countries
+  geom_vline(data = filter(covid_data_clean, location == "Iran"), aes(xintercept = covid_data_clean[400,11]))+
+   #Add x-axis label
+  xlab("Date")+
+  #Add y-axis label
+  ylab("New Cases")
+
+```
+In Iran we can see a spike in early March which starts to decrease after a lock down is put in place however, cases start to increase dramatically to 2000+ cases on March 25 which later peaks in early April. In Early April once the daily cases began to drop lock down restrictions were eased leading to a surge in cases between May and June.[5] 
+
+```{r}
+#Plot a line graph using the clean covid data examining new cases over time
+ggplot(data = filter(covid_data_clean, location == "Italy"), aes(x = date, y = new_cases, group = location, color = location))+
+  geom_line(linewidth = 0.75, colour = "deepskyblue1")+
+  #Scale x-axis by month
+  scale_x_date(date_breaks = "1 month", date_labels = "%b-%y")+
+  #Add title
+  labs(title = "Italy's New Covid Infections By Calendar Date")+
+  #Add vertical lines representing when lockdowns first began in each of the countries
+  geom_vline(data = filter(covid_data_clean, location == "Italy"), aes(xintercept = covid_data_clean[588,11]))+
+  #Add x-axis label
+  xlab("Date")+
+  #Add y-axis label
+  ylab("New Cases")
+
+```
+In Italy the first regions were locked down preventing various public areas and social venues such as pubs to be used causing outrage. With cases still increasing the Italian government ordered a nationwide lock down on March 21 by closing all non-essential industries and businesses, preventing free movement and closing down public parks and playgrounds. As you can see on the graph these measures had a strong affect on daily case numbers causing them to plummet. Restrictions we eased on May 18 with most businesses reopening and free travel restored.[6]
+
+```{r}
+#Plot a line graph using the clean covid data examining new cases over time
+ggplot(data = filter(covid_data_clean, location == "Spain"), aes(x = date, y = new_cases, group = location, color = location))+
+  geom_line(linewidth = 0.75, colour = "mediumorchid1")+
+  #Scale x-axis by month
+  scale_x_date(date_breaks = "1 month", date_labels = "%b-%y")+
+  #Add title
+  labs(title = "Spain's New Covid Infections By Calendar Date")+
+  #Add vertical lines representing when lockdowns first began in each of the countries
+  geom_vline(data = filter(covid_data_clean, location == "Spain"), aes(xintercept = covid_data_clean[213,11]))+
+  #Add x-axis label
+  xlab("Date")+
+  #Add y-axis label
+  ylab("New Cases")
+
+```
+In Spain the first lock down was ordered on March 14 with restrictions tightened on March 30 preventing any non-essential workers from leaving home.[7] Upon examining the graph we can see cases peaking around the point where the lock down restrictions were tightened with daily cases sharply decreasing after they restrictions were implemented. Lock down restrictions were later eased on June 21 however in July cases began to increase again leading to various regions of the country bringing back restrictions.[8][9]
+
+Now that we have examined new daily cases for each country lets examine if each countries GDP has any effect on their COVID statistics.
+
+First we will calculate the mean GDP across all the countries we have data for.
+```{r}
+#Calculate mean GDP of locations
+mean_gdp <- covid_data_clean %>%
+  summarise(mean_gdp = mean(gdp_per_capita)) %>%
+  pull(mean_gdp)
+mean_gdp
+ 
+  
+```
+Now lets create a new column in our data set which compares the countries GDP and compares it to the average GDP between the countries stating "higher" or "lower".
+
+```{r}
+#Assigning new column to data frame which describes if the locations GDP per capita is higher or lower than the average called GDP_status
+covid_data_clean <- covid_data_clean %>%
+  mutate(
+    GDP_status = ifelse(
+      mean_gdp, #mean of GDP_per_capita
+      "Higher", 
+      "Lower"
+    )
+  )
+#Check data frame to see if new column has been added as intended
+head(covid_data_clean)
+```
+Now lets add two columns. The first is called daily infected case rate which is new_cases divided by the population of the country. The second is called daily death rate which is new_deaths divided by the population of the country.
+
+```{r}
+#Adding daily_infected_case_rate column
+covid_data_clean <- covid_data_clean%>%
+  mutate(
+   daily_infected_case_rate = (new_cases / population) 
+  )
+
+#Adding daily_death_rate column
+covid_data_clean <- covid_data_clean%>%
+  mutate(
+   daily_death_rate = (new_deaths / population) 
+  )
+head(covid_data_clean)
+```
+Now we can create a plot to represent the relationship between the daily infected case rate within different GDP groups.
+
+```{r}
+#Generate plot of the relationship between the daily infected case rate within different GDP groups
+ggplot(data = covid_data_clean, aes(x = date, y = daily_infected_case_rate, group = GDP_status, color = GDP_status))+
+  geom_line()+
+  #Scale x-axis by month
+  scale_x_date(date_breaks = "1 month", date_labels = "%b-%y")+
+  #Add title and legend description
+  labs(title = "Daily Infected Case Rate by GDP Status", colour = "GDP Status")+
+  #Add y-axis label
+  ylab("Daily Infected Case Rate")+
+  #Add x-axis label
+  xlab("Date")
+  
+  
+```
+As we can see from the graph there looks like there is a higher daily infected case rate for countries with a low GDP status.
+
+Lets plot the relationship between the daily death rate within different GDP groups.
+```{r}
+#Generate plot of the relationship between the daily death rate within different GDP groups
+ggplot(data = covid_data_clean, aes(x = date, y = daily_death_rate, group = GDP_status, color = GDP_status))+
+  geom_line()+
+  #Scale x-axis by month
+  scale_x_date(date_breaks = "1 month", date_labels = "%b-%y")+
+  #Add title and legend description
+  labs(title = "Daily Death Rate by GDP Status", colour = "GDP Status")+
+  #Add y-axis label
+  ylab("Daily death Rate")+
+  #Add x-axis label
+  xlab("Date")
+  
+```
+Looking at the graph we can see that countries with lower GDP per capita have a higher daily death rate than countries with a high GDP per capita however this difference is not as pronounced as the difference between high and low GDP per capita when looking at the daily infected case rate. These differences between higher and lower GDP per capita are likely due to better healthcare facilities and practices that are present in countries with a higher GDP status compared to countries with a lower GDP status. Better healthcare facilities allow for sick patients to recover faster. Better healthcare practices and education of the public on matters such as hand hygiene and social distancing allow the population to stay safe from COVID and reduce transmission rate.
+
+###Task 3: Predictive data analysis
+
+Next we will create a model to predict the number of new daily cases in Australia.
+```{r}
+#Install Caret library
+library(caret)
+#Filtering data
+covid_aus_filter <- filter(covid_data_clean, location == "Australia")
+
+#Split data into training and test data
+set.seed(100)
+training.samples <- covid_aus_filter$new_cases %>%
+  createDataPartition(p = 0.8, list = FALSE)
+train.data <- covid_aus_filter[training.samples, ]
+test.data <- covid_aus_filter[-training.samples, ]
+
+#Creating polynomial model to predict daily cases in Australia.
+model_1 <- lm(new_cases ~ poly(as.numeric(date), 5, raw = TRUE), data = train.data)
+
+#Make predictions using the test data
+predictions <- model_1 %>% predict(test.data)
+
+#view model performance
+model_1_performance = data.frame( RMSE = RMSE(predictions, test.data$new_cases),R2 = R2(predictions, test.data$new_cases))
+
+
+print(model_1_performance)
+```
+For our model we have used a polynomial of degree 5 to create it and have used a train test split of 8:2 (80% training, 20% testing). 
+As we can see with the R2 score of the model its predictive ability is not very good when we test it using a simple training test split.
+Lets see what our model looks like when plotted next to our data.
+
+```{r}
+#Create a data frame for predictions allowing for the data to be plotted
+date_range <- data.frame(date = seq(min(covid_aus_filter$date), max(covid_aus_filter$date), by = "day")) # Create a sequence of dates for prediction
+date_range$predicted_cases <- predict(model_1, newdata = data.frame(date = as.numeric(date_range$date)))
+
+
+#Plotting the model and the data together
+ggplot(covid_aus_filter, aes(date, new_cases)) +
+  geom_point() +
+  geom_line(data = date_range, aes(x = date, y = predicted_cases), color = "blue") + # Use geom_line with predictions
+  scale_x_date()
+```
+
+Lets perform K-fold Cross-Validation on our model to evaluate our predictions.
+```{r}
+#Specify the cross-validation method
+ctrl <- trainControl(method = "cv", number = 5)
+
+#Recreating regression model using K-fold CV to evaluate performance
+model_2 <- train(new_cases ~ poly(as.numeric(date), 5, raw = TRUE), data = covid_aus_filter, method = "lm", trControl = ctrl)
+
+print(model_2)
+```
+Using 5 fold CV we improved the R2 value of the model from 0.11 to 0.14 however this value is still too low to be considered a good model. An effective model usually has an R2 value of higher than 0.7.
+
+Lets use both our models to predict the next week of new cases in Australia.
+
+```{r}
+#Find the most recent date in our filtered data
+max(covid_aus_filter$date)
+```
+Now lets create a data frame with the next week of dates and predict new_cases for them.
+```{r}
+#Create dataframe of dates to predict new cases.
+predict_dates <- data.frame(date = c("2020-07-14", "2020-07-15", "2020-07-16", "2020-07-17", "2020-07-18", "2020-07-19", "2020-07-20"))
+predict_dates <- predict_dates %>%
+  mutate(date = ymd(date))
+
+#Predicting new cases in Australia for the next week after our data ends using model_1
+predict(model_1, predict_dates)
+
+
+```
+Now lets predict new cases using model 2.
+```{r}
+#Predicting new cases in Australia for the next week after our data ends using model_2
+predict(model_2, predict_dates)
+```
+When examining the predicted values with the actual new case statistics from this website https://covidlive.com.au/archive we can see that both models under predict the values by quite a margin. This is likely due to the model being underfit. When examining the graph of the model with the data side by side we can see that the model does not follow the shape of the data very and is poor at predicting the training data. If the model was overfit the model would follow the shape of the data almost perfectly and therefore predict the training data perfectly. However with over fit data it would be unable to predict the test data well.
+The CV technique helped improve the underfitting problem of our data slightly however there was no significant change to the model performance allowing it to be deployed as an accurate predictor of new COVID cases in Australia.
+To improve the predictive ability of the model would be to apply feature selection and add more features to the model. This would provide more information for the model to base its prediction off rather than just the date and the new case numbers. Features such as cases in high population density / low population density areas could provide more information to the model as cases in high  population density areas would lead to higher case numbers through viral transmission.
+
+
+##References
+[1]Group of Eight (Australian universities) (April 2020). A Roadmap to Recovery -- A Report for the Nation (PDF) (Report).
+[2]"Judicial Inquiry into Hotel Quarantine Program". www.premier.vic.gov.au. Victorian Government. 2 July 2020. Retrieved 28 January 2021.
+[3] "France to extend coronavirus emergency for two months". Al Jazeera. 2 May 2020. Archived from the original on 5 May 2020. Retrieved 4 May 2020.
+[4]"REPLAY. Coronavirus : prolongation du confinement jusqu'au 11 mai, tests, masques... Revivez l'allocution d'Emmanuel Macron". France Info. 13 April 2020. Archived from the original on 14 April 2020. Retrieved 13 April 2020.
+[5]Arsalan Shahla (6 May 2020). "Iran's Coronavirus Cases Creep Up After Officials Ease Lockdown". Bloomberg.
+[6]"Coronavirus: Italy's Conte offers hope as travel restrictions end". BBC News. 3 June 2020. Retrieved 7 October 2020.
+[7]"Spain poised to tighten coronavirus lockdown after record daily toll". MSN. Retrieved 2020-03-29.
+[8]"Coronavirus: Spain drives fears of European 'second wave'". BBC. 2020-07-25.
+[9] "Spain won't declare another national state of alarm, allows regions to lockdown if necessary". Euroactiv. 2020-08-26.
