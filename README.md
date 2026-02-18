@@ -1,21 +1,21 @@
 # COVID‑19 Outcomes Across Economic Groups: A Cross‑Country Data Analysis
 This project explores how COVID‑19 case and death trends varied across countries with different economic capacities. Using publicly available COVID‑19 data, the analysis examines lockdown timing, case trajectories, data quality issues, and the relationship between GDP per capita and COVID‑19 outcomes. The project demonstrates skills in data cleaning, feature engineering, visualisation, and analytical storytelling using R.
 
-## 📌 Project Overview
+## Project Overview
 This analysis investigates four key areas:
 - Daily COVID‑19 case trends across multiple countries
 - Impact of lockdown timing on case trajectories
 - Data quality issues, including missing or anomalous values
 - Relationship between GDP per capita and COVID‑19 outcomes, using custom‑engineered economic groupings
 
-## 🛠️ Tools & Technologies
+## Tools & Technologies
 - R Studio
 - R Markdown for reproducible reporting
 - ggplot2 for visualisation
 - dplyr for data wrangling
 - here for reproducible file paths
 
-## 🔍 Key Steps in the Analysis
+## Key Steps in the Analysis
 1. Data Cleaning & Preparation
 - Standardised column names
 - Converted dates to proper formats
@@ -35,7 +35,7 @@ This analysis investigates four key areas:
 - Created a new column classifying each country as “Higher” or “Lower” GDP
 - Compared COVID‑19 outcomes across economic groups
 
-## 📊 Visualisations
+## Visualisations
 The project includes several plots, such as:
 - Daily new cases by country
 - Lockdown timing vs. case trajectories
@@ -43,17 +43,10 @@ The project includes several plots, such as:
 - Highlighted anomalies in reporting
 All plots are generated using ggplot2 and included in the knitted report.
 
-## 📈 Key Insights
+## Key Insights
 - Most countries peaked in late March to early April, with declines following lockdowns.
 - Higher‑GDP countries did not always experience better outcomes — suggesting policy timing and compliance played major roles.
 - Data quality issues were common and required careful cleaning to avoid misleading conclusions.
 - Second waves often aligned with premature easing of restrictions.
-
-## 📚 Future Improvements
-- Incorporate vaccination data
-- Add mobility or policy‑stringency indices
-- Build predictive models for case trajectories
-- Expand dataset to include more countries
-
 
 
